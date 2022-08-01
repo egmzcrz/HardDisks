@@ -1,4 +1,4 @@
-export Box, predictCollisionInCell, predictCollisionInNeighborhood, updateBox!, handleCollision!
+export Box, predictCollisionInCell, predictCollisionInNeighborhood, updateBox!, handleCollisionEvent!, handleTransferEvent!
 
 include("event.jl")
 include("particle.jl")
@@ -161,7 +161,7 @@ Computes the next collision time and partner of particle `p` against the particl
     # check against particles in (row´,col´)-cell
     for partner in grid[row´, col´]
         time = predictCollisionTime(p, config[partner])
-        if currTime > time
+        if currTime > time # TODO 1: AND if currTime > partner's collision time
             currTime = time
             currPartner = partner
         end
@@ -286,15 +286,16 @@ end
 
 
 """
-    handleCollision!(box, event)
+    handleCollisionEvent!(box, event)
+
+Handles a wall collision or a particle collision. The involved particles get their state updated.
 
 # Arguments
 
 - `box::Box`: the box containing the particle configuration, grid and event queue
 - `event::Event`: the collision event to handle; it can be a wall or particle collision
-
 """
-@inline function handleCollision!(box::Box, event::Event)
+@inline function handleCollisionEvent!(box::Box, event::Event)
     i = event.particle
     j = event.partner # if wall collision then partner doesn't exist (j==0)
     p = box.config[i]
@@ -318,15 +319,62 @@ end
     box.clock = t
 end
 
-
 """
-    updateBox!(box)
+    handleTransferEvent!(box, event)
 
-Handles the next event in line and updates the event queue and the state of the particles involved.
+Handles a transfer event.
 
 # Arguments
 
 - `box::Box`: the box containing the particle configuration, grid and event queue
+- `event::Event`: the collision event to handle; it can be a wall or particle collision
+
+"""
+@inline function handleTransferEvent!(box::Box, event::Event)
+    i = event.particle
+    p = box.config[i]
+    t = event.timestamp
+    move!(p, t)
+    y = real2grid(p.ry, box.gridSize)
+    x = real2grid(p.rx, box.gridSize)
+    if y == event.y && x == event.x
+        #println("particle moved but did not transfer")
+        t = t + 1e-17
+        move!(p, t)
+        #println(event.timestamp)
+        #println(p.ry, " ", p.rx)
+        #println(p.ry, " ", p.rx)
+    end
+    # delete from old cell
+    cellPrev = box.grid[event.y, event.x]
+    deleteat!(cellPrev, findfirst(isequal(i), cellPrev))
+    # add to new cell
+    y´ = pbcCell(event.y´, box.gridSize)
+    x´ = pbcCell(event.x´, box.gridSize)
+    cellNext = box.grid[y´, x´]
+    push!(cellNext, i)
+
+    box.clock = t
+end
+
+
+"""
+    updateBox!(box)
+
+Handles the next event in line and updates the state of the event queue and the particles involved.
+
+The algorithm follows this steps:
+
+1. Gets the next event from the _Indexed Minimum Priority Queue_
+2. Handles the event according to its type
+  1. In a particle collision both particles get their velocities updated. The next event of particle `p` gets recomputed against all neighboring cells. The event of its partner gets cancelled by changing its type to a CHECK
+  2. In a wall collision the particle involved gets its velocity updated. Its next event gets recomputed against all neighboring cells
+  3. In a transfer event the particle involved gets its grid position updated and its event recomputed according to the next visible neighboring cells
+  4. In a check event the particle gets its event recomputed against all neighboring cells
+
+# Arguments
+
+- `box::Box`: the box containing the particle configuration, the grid and the event queue
 
 """
 function updateBox!(box::Box)
@@ -334,36 +382,18 @@ function updateBox!(box::Box)
     event = minKey(box.events)
     isBoxUpdated = event.type == CHECK ? false : true
 
-    # handle event
     i = event.particle
     p = box.config[i]
-    t = event.timestamp  # collision or transfer timestamp
     dy = 0 # used to compute the new visible neighborhood
     dx = 0 # used to compute the new visible neighborhood
-    if event.type == COLLISION
-        handleCollision!(box, event)
-    elseif event.type == TRANSFER
-        move!(p, t)
-        y = real2grid(p.ry, box.gridSize)
-        x = real2grid(p.rx, box.gridSize)
-        if y == event.y && x == event.x
-            #println("particle moved but did not transfer")
-            t = t + 1e-17
-            move!(p, t)
-            #println(event.timestamp)
-            #println(p.ry, " ", p.rx)
-            #println(p.ry, " ", p.rx)
-        end
-        # delete from old cell
-        cellPrev = box.grid[event.y, event.x]
-        deleteat!(cellPrev, findfirst(isequal(i), cellPrev))
-        # add to new cell
-        y´ = pbcCell(event.y´, box.gridSize)
-        x´ = pbcCell(event.x´, box.gridSize)
-        cellNext = box.grid[y´, x´]
-        push!(cellNext, i)
 
-        # get new visible part of neighborhood
+    # handle different types of events
+    if event.type == COLLISION
+        handleCollisionEvent!(box, event)
+    elseif event.type == TRANSFER
+        handleTransferEvent!(box, event)
+
+        # get the new visible part of the neighborhood
         dy = sign(event.y´ - event.y)
         dx = sign(event.x´ - event.x)
 
@@ -373,9 +403,8 @@ function updateBox!(box::Box)
             p.rx = pbcPosition(p.rx)
             p.ry = pbcPosition(p.ry)
         end
-        box.clock = t
-    else
-        # this is a CHECK, so nothing to be handled
+    else # event.type == CHECK
+        # Nothing to be handled
     end
 
     # compute particle's next transfer time
@@ -389,34 +418,33 @@ function updateBox!(box::Box)
     tCollision = tParticleCollision
     if tParticleCollision < tBorderCollision
         border = NONE
-        # check if new found partner has a more closer scheduled collision
-        # event´ = keyOf(box.events, partner)
-        # partner´ = event´.partner # partner's old partner may not exist
-        # if tCollision < event´.tCollision
-        #     # adjust event for newly found partner
-        #     # TODO: validate for CHECK event?
-        #     type´ = tCollision < event´.tTransfer ? COLLISION : TRANSFER
-        #     event´ = Event(tCollision, event´.tTransfer,
-        #         partner, i,
-        #         event´.border,
-        #         event´.y, event´.x, event´.y´, event´.x´,
-        #         type´)
-        #     changeKey!(box.events, partner, event´)
+        # TODO-2 (see TODO-1): Update partner's event and change the event type of partner's old parter to a CHECK
+        #event´ = keyOf(box.events, partner)
+        #partner´ = event´.partner # partner's old partner may not exist
+        ## adjust event for newly found partner
+        #type´ = tCollision < event´.tTransfer ? COLLISION : TRANSFER
+        #event´ = Event(tCollision, event´.tTransfer,
+        #    partner, i,
+        #    event´.border,
+        #    event´.y, event´.x, event´.y´, event´.x´,
+        #    type´)
+        #changeKey!(box.events, partner, event´)
 
-        # TODO: why is this not mandatory?
-        # update event to a CHECK for old partner of newly found partner
+        #update event type to a CHECK for old partner of newly found partner
         #if partner´ > 0
         #	event´´ = keyOf(box.events, partner´)
         #	event´´ = Event(event´´.tCollision, event´´.tTransfer,
-        #									partner´, event´´.partner, event´´.border, event´´.y, event´´.x, event´´.y´, event´´.x´, CHECK)
+        #									partner´, event´´.partner, event´´.border,
+        #                                   event´´.y, event´´.x, event´´.y´, event´´.x´, CHECK)
         #	changeKey!(box.events, partner´, event´´)
         #end
-        # end
     else
         partner = 0
         tCollision = tBorderCollision
     end
 
+
+    # TODO: this check may be implemented at the moment of recomputing against new visible neighborhood
     # adjust particle event
     if event.type == TRANSFER
         # check if new partner is better than current
@@ -426,37 +454,28 @@ function updateBox!(box::Box)
             border = event.border
         end
     end
-    type = tCollision < tTransfer ? COLLISION : TRANSFER
+
     event = Event(tCollision, tTransfer,
         i, partner,
         border,
         y, x, y´, x´,
-        type)
+        tTransfer < tCollision ? TRANSFER : COLLISION)
     changeKey!(box.events, i, event)
-    #box.clock = t # TODO: in case of CHECK box.clock shouldn't be updated??
     return isBoxUpdated
 end
 
 """
     updateBox!(box, ϕMax, steps)
 
-Calls [`updateBox!(box)`](@ref) until the packing fraction reaches an upper limit or its relative increment gets lower than a given threshold
-
-This is the main program loop. The algorithm follows this steps:
-
-1. Gets the next event from the _Indexed Minimum Priority Queue_
-2. Handles the event according to its type
-    1. For a particle collision both particles get their velocities updated. Only the event of particle `p` gets updated. The partner gets its event updated to a CHECK
-    2. For a wall collision the particle involved gets its velocity and event updated
-    3. For a transfer event the particle involved gets its grid position updated
+This is the main program loop. It calls [`updateBox!(box)`](@ref) until the packing fraction reaches an upper limit or its relative increment gets lower than a given threshold
 
 # Arguments
 
 - `box::Box`: the box containing the particle configuration, grid and event queue
-
+- `ϕMax::Float64`: the target packing fraction
+- `n::Int`: the number of measurements to average to get the average relative increment of the packing fraction
 """
-function updateBox!(box::Box, ϕMax::Float64; steps::Int=1000000)
-    n = steps
+function updateBox!(box::Box, ϕMax::Float64; n::Int=1000000)
     ϕCurr = 0.0
     δϕ = 0.0    # ∑(tCurr/tPrev)²
     Δϕ = Inf    # <Δϕ> = ∑[(ϕCurr-ϕPrev)/ϕPrev]/n = ∑[(tCurr/tPrev)²-1]/n = ∑(δϕ)/n - 1
