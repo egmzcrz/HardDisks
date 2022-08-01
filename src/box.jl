@@ -1,4 +1,4 @@
-export Box, predictCollisionInCell, predictCollisionInNeighborhood
+export Box, predictCollisionInCell, predictCollisionInNeighborhood, updateBox!, handleCollision!
 
 include("event.jl")
 include("particle.jl")
@@ -285,7 +285,16 @@ function predictCollisionInNeighborhood(box::Box, p::Particle, dy::Int, dx::Int)
 end
 
 
-@inline function handleCollision(box::Box, event::Event)
+"""
+    handleCollision!(box, event)
+
+# Arguments
+
+- `box::Box`: the box containing the particle configuration, grid and event queue
+- `event::Event`: the collision event to handle; it can be a wall or particle collision
+
+"""
+@inline function handleCollision!(box::Box, event::Event)
     i = event.particle
     j = event.partner # if wall collision then partner doesn't exist (j==0)
     p = box.config[i]
@@ -311,17 +320,9 @@ end
 
 
 """
-updateBox!(box)
+    updateBox!(box)
 
-Handles the next event in line and updates the event queue and the particles involved.
-
-This is the main program loop. The algorithm follows this steps:
-
-1. Gets the next event from the _Indexed Minimum Priority Queue_
-2. Handles the event according to its type
-1. For a particle collision both particles get their velocities updated. Only the event of particle _p_ gets updated. The partner gets its event updated to a CHECK
-2. For a wall collision the particle involved gets its velocity and event updated
-3. For a transfer event the particle involved gets its grid position updated
+Handles the next event in line and updates the event queue and the state of the particles involved.
 
 # Arguments
 
@@ -340,26 +341,7 @@ function updateBox!(box::Box)
     dy = 0 # used to compute the new visible neighborhood
     dx = 0 # used to compute the new visible neighborhood
     if event.type == COLLISION
-        handleCollision(box, event)
-        # i = event.particle
-        # j = event.partner # partner may not exist if wall collision
-        # if j > 0 # particle collision
-        #     collide!(p, box.config[j], t)
-        #     # update partner event to a CHECK
-        #     changeKey!(box.events, j, Event(t, Inf, j, i, NONE, 0, 0, 0, 0, CHECK))
-        # else # border collision
-        #     border = event.border
-        #     if border == RIGHT
-        #         collideWithRightWall!(p, t)
-        #     elseif border == TOP
-        #         collideWithTopWall!(p, t)
-        #     elseif border == LEFT
-        #         collideWithLeftWall!(p, t)
-        #     else
-        #         collideWithBottomWall!(p, t)
-        #     end
-        # end
-        # box.clock = t
+        handleCollision!(box, event)
     elseif event.type == TRANSFER
         move!(p, t)
         y = real2grid(p.ry, box.gridSize)
@@ -455,30 +437,44 @@ function updateBox!(box::Box)
     return isBoxUpdated
 end
 
+"""
+    updateBox!(box, ϕMax, steps)
+
+Calls [`updateBox!(box)`](@ref) until the packing fraction reaches an upper limit or its relative increment gets lower than a given threshold
+
+This is the main program loop. The algorithm follows this steps:
+
+1. Gets the next event from the _Indexed Minimum Priority Queue_
+2. Handles the event according to its type
+    1. For a particle collision both particles get their velocities updated. Only the event of particle `p` gets updated. The partner gets its event updated to a CHECK
+    2. For a wall collision the particle involved gets its velocity and event updated
+    3. For a transfer event the particle involved gets its grid position updated
+
+# Arguments
+
+- `box::Box`: the box containing the particle configuration, grid and event queue
+
+"""
 function updateBox!(box::Box, ϕMax::Float64; steps::Int=1000000)
-    ϕCurr = 0
-    Δϕ = 0.0
+    n = steps
+    ϕCurr = 0.0
+    δϕ = 0.0    # ∑(tCurr/tPrev)²
+    Δϕ = Inf    # <Δϕ> = ∑[(ϕCurr-ϕPrev)/ϕPrev]/n = ∑[(tCurr/tPrev)²-1]/n = ∑(δϕ)/n - 1
     k = 0
     ϕRate = box.packingRate
-    while ϕCurr < ϕMax
+    while ϕCurr < ϕMax && Δϕ > 1.0e-6
         tPrev = box.clock
         updateBox!(box)
         tCurr = box.clock
 
-        ϕCurr = ϕRate * box.clock^2
+        ϕCurr = ϕRate * tCurr^2
 
         k += 1
-        k = mod(k, steps)
-        Δϕ += (tCurr / tPrev)^2 - 1
-        if k == 0
-            Δϕ /= steps
-            if Δϕ < 1e-6
-                #println(Δϕ)
-                break
-            else
-                Δϕ = 0.0
-            end
-            #println(ϕCurr)
+        δϕ += (tCurr / tPrev)^2
+        if mod(k, n) == 0
+            Δϕ = δϕ / n - 1
+            δϕ = 0.0
+            k = 0
         end
     end
 end
