@@ -1,4 +1,4 @@
-export Box, predictCollisionInCell, predictCollisionInNeighborhood, updateBox!, handleCollisionEvent!, handleTransferEvent!
+export Box, computeNextCollisionInsideCell, predictCollisionInNeighborhood, updateBox!, handleCollisionEvent!, handleTransferEvent!
 
 include("event.jl")
 include("particle.jl")
@@ -120,25 +120,25 @@ end
 
 
 """
-    predictCollisionInCell(box, p, row, col, currTime, currPartner)
+    computeNextCollisionInsideCell(box, p, row, col, currTime, currPartner)
 
-Computes the next collision time and partner of particle `p` against the particles inside the **cell at `(row,col)`**.
+Computes the time and partner of the next collision of particle `p` inside the **cell at `(row,col)`**.
 
 # Arguments
 
-- `box::Box`: the box containing the particle configuration and grid
+- `box::Box`: the box contains the particle configuration and grid
 - `p::Particle`: the particle for which the prediction is computed
-- `row::Int`: the row position of the cell to check against
-- `col::Int`: the column position of the cell to check against
-- `currTime::Float64`: the current time of an existing prediction for particle `p`
-- `currPartner::Int`: the current partner of an existing prediction for particle `p`
+- `row::Int`: the row position of the cell to check
+- `col::Int`: the column position of the cell to check
+- `currTime::Float64`: an existing time prediction for particle `p`
+- `currPartner::Int`: an existing partner prediction for particle `p`
 
 # Returns
 
-- `currTime::Float64`: the time of the next collision
-- `currPartner::Int`: the index of the collision partner
+- `nextTime::Float64`: the computed time of the next collision
+- `nextPartner::Int`: the computed partner of the next collision
 """
-@inline function predictCollisionInCell(box::Box,
+@inline function computeNextCollisionInsideCell(box::Box,
     p::Particle, row::Int, col::Int,
     currTime::Float64, currPartner::Int)
 
@@ -149,21 +149,24 @@ Computes the next collision time and partner of particle `p` against the particl
     # (row,col)-cell might be out-of-bounds, handle PBCs
     row´ = pbcCell(row, gridSize)
     col´ = pbcCell(col, gridSize)
+    isOutOfBounds = row´ != row || col´ != col
 
     # particle p might need to be translated to its image cell
     ry = p.ry
     rx = p.rx
-    if row´ != row || col´ != col
+    if isOutOfBounds
         p.ry = image(ry, row, gridSize)
         p.rx = image(rx, col, gridSize)
     end
 
     # check against particles in (row´,col´)-cell
-    for partner in grid[row´, col´]
-        time = predictCollisionTime(p, config[partner])
-        if currTime > time # TODO 1: AND if currTime > partner's collision time
-            currTime = time
-            currPartner = partner
+    nextTime = currTime
+    nextPartner = currPartner
+    for potentialPartner in grid[row´, col´]
+        potentialTime = predictCollisionTime(p, config[potentialPartner])
+        if nextTime > potentialTime # TODO 1: AND potential time < potential partner's collision time
+            nextTime = potentialTime
+            nextPartner = potentialPartner
         end
     end
 
@@ -171,7 +174,7 @@ Computes the next collision time and partner of particle `p` against the particl
     p.ry = ry
     p.rx = rx
 
-    return currTime, currPartner
+    return nextTime, nextPartner
 end
 
 
@@ -203,9 +206,9 @@ function predictCollisionInNeighborhood(box::Box, p::Particle)
 
     col´ = col + 1
     for row´ in row-1:row+1
-        time, partner = predictCollisionInCell(box, p, row´, col´, time, partner)
+        time, partner = computeNextCollisionInsideCell(box, p, row´, col´, time, partner)
     end
-    time, partner = predictCollisionInCell(box, p, row + 1, col, time, partner)
+    time, partner = computeNextCollisionInsideCell(box, p, row + 1, col, time, partner)
 
     return time, partner
 end
@@ -254,7 +257,7 @@ function predictCollisionInNeighborhood(box::Box, p::Particle, dy::Int, dx::Int)
 
     if dx == 0 && dx == 0
         for row´ in row-1:row+1, col´ in col-1:col+1
-            time, partner = predictCollisionInCell(box, p, row´, col´, time, partner)
+            time, partner = computeNextCollisionInsideCell(box, p, row´, col´, time, partner)
         end
     elseif dx != 0 && dy != 0
         # TODO: check if this ever happens
@@ -262,23 +265,23 @@ function predictCollisionInNeighborhood(box::Box, p::Particle, dy::Int, dx::Int)
         # (y + dy, x), (y + dy, x - dx)
         col´ = col + dx
         for row´ in row-dy:row+dy
-            time, partner = predictCollisionInCell(box, p, row´, col´, time, partner)
+            time, partner = computeNextCollisionInsideCell(box, p, row´, col´, time, partner)
         end
         row´ = row + dy
         for col´ in col:col-dx
-            time, partner = predictCollisionInCell(box, p, row´, col´, time, partner)
+            time, partner = computeNextCollisionInsideCell(box, p, row´, col´, time, partner)
         end
     elseif dx != 0
         # (y + 1, x + dx), (y, x + dx), (y - 1, x + dx)
         col´ = col + dx
         for row´ in row-1:row+1
-            time, partner = predictCollisionInCell(box, p, row´, col´, time, partner)
+            time, partner = computeNextCollisionInsideCell(box, p, row´, col´, time, partner)
         end
     else
         # (y + dy, x + 1), (y + dy, x), (y + dy, x - 1)
         row´ = row + dy
         for col´ in col-1:col+1
-            time, partner = predictCollisionInCell(box, p, row´, col´, time, partner)
+            time, partner = computeNextCollisionInsideCell(box, p, row´, col´, time, partner)
         end
     end
     return time, partner
