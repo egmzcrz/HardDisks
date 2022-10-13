@@ -1,4 +1,4 @@
-export Box, computeNextCollisionInsideCell, predictCollisionInNeighborhood, updateBox!, handleCollisionEvent!, handleTransferEvent!
+export Box, computeNextCollisionInsideCell, computeNextCollisionInsideLNeighborhood, updateBox!, handleCollisionEvent!, handleTransferEvent!
 
 include("event.jl")
 include("particle.jl")
@@ -89,7 +89,7 @@ mutable struct Box
                     end
                 end
                 # check for particle collisions in an L-shaped neighborhood
-                t, j = predictCollisionInNeighborhood(box, p)
+                t, j = computeNextCollisionInsideLNeighborhood(box, p)
                 if tCollision > t
                     tCollision = t
                     partner = j
@@ -179,38 +179,43 @@ end
 
 
 """
-    predictCollisionInNeighborhood(box, p)
+    computeNextCollisionInsideLNeighborhood(box, p)
 
-Computes the next collision time and partner of particle `p` against the particles inside an **L-shaped neighborhood**:
+
+Computes the time and partner of the next collision of particle `p` inside an **L-shaped neighborhood**:
 
     |   | X | X |
     |   | p | X |
     |   |   | X |
 
+At event queue initialization each cell needs to be checked against its neighbors to find collisions,
+but instead of searching the full 8-cell-neighborhood, the L-shaped neighborhood gets the complete search
+done but without repeated checks.
+
 # Arguments
 
-- `box::Box`: the box containing the particle configuration and grid
+- `box::Box`: the box contains the particle configuration and grid
 - `p::Particle`: the particle for which the prediction is computed
 
 # Returns
 
-- `time::Float64`: the time of the next collision
-- `partner::Int`: the index of the collision partner
+- `nextTime::Float64`: the computed time of the next collision
+- `nextPartner::Int`: the computed partner of the next collision
 """
-function predictCollisionInNeighborhood(box::Box, p::Particle)
+function computeNextCollisionInsideLNeighborhood(box::Box, p::Particle)
     col = real2grid(p.rx, box.gridSize)
     row = real2grid(p.ry, box.gridSize)
 
-    time = Inf
-    partner = 0
+    nextTime = Inf
+    nextPartner = 0
 
     col´ = col + 1
     for row´ in row-1:row+1
-        time, partner = computeNextCollisionInsideCell(box, p, row´, col´, time, partner)
+        nextTime, nextPartner = computeNextCollisionInsideCell(box, p, row´, col´, nextTime, nextPartner)
     end
-    time, partner = computeNextCollisionInsideCell(box, p, row + 1, col, time, partner)
+    nextTime, nextPartner = computeNextCollisionInsideCell(box, p, row + 1, col, nextTime, nextPartner)
 
-    return time, partner
+    return nextTime, nextPartner
 end
 
 """
@@ -246,7 +251,7 @@ Computes the next collision time and partner of particle `p` against the particl
 - `time::Float64`: the time of the next collision
 - `partner::Int`: the index of the collision partner
 """
-function predictCollisionInNeighborhood(box::Box, p::Particle, dy::Int, dx::Int)
+function computeNextCollisionInsideLNeighborhood(box::Box, p::Particle, dy::Int, dx::Int)
     # REMEMBER that return statements inside IFs make the function allocate a lot more memory!
 
     col = real2grid(p.rx, box.gridSize)
@@ -414,7 +419,7 @@ function updateBox!(box::Box)
     tTransfer, y, x, y´, x´ = predictTransferTime(p, box.cellWidth)
 
     # compute particle's next collision time within appropriate neighborhood
-    tParticleCollision, partner = predictCollisionInNeighborhood(box, p, dy, dx)
+    tParticleCollision, partner = computeNextCollisionInsideLNeighborhood(box, p, dy, dx)
     tBorderCollision, border = predictCollisionTime(p, box.gridSize)
 
     # update particle 
