@@ -1,4 +1,5 @@
-export Box, computeNextCollisionInsideCell, computeNextCollisionInsideLNeighborhood, updateBox!, handleCollisionEvent!, handleTransferEvent!
+export Box, computeNextCollisionInsideCell, computeNextCollisionInsideLNeighborhood,
+computeNextCollisionInsideVisibleNeighborhood, updateBox!, handleCollisionEvent!, handleTransferEvent!
 
 include("event.jl")
 include("particle.jl")
@@ -218,22 +219,25 @@ function computeNextCollisionInsideLNeighborhood(box::Box, p::Particle)
     return nextTime, nextPartner
 end
 
-"""
-    predictCollisionInNeighborhood(box, p, dy, dx)
 
-Computes the next collision time and partner of particle `p` against the particles inside a **proper neighborhood**:
+"""
+    computeNextCollisionInsideVisibleNeighborhood(box, p, dy, dx)
+
+Computes the time and partner of the next collision of particle `p` inside its new **visible neighborhood**.
+The new visible neighborhood is computed based on the step the particle took while changing cells. If the
+particle didn't move between cells then the new visible neighborhood is taken to be the full neighborhood:
 
     |   |   | X |
-    |   | p | X |
+    | p´| p | X |
     |   |   | X |
     
     | X | X | X |
     |   | p |   |
-    |   |   |   |
+    |   | p´|   |
     
     | X | X | X |
     |   | p | X |
-    |   |   | X |
+    | p´|   | X |
     
     | X | X | X |
     | X | X | X |
@@ -241,28 +245,28 @@ Computes the next collision time and partner of particle `p` against the particl
 
 # Arguments
 
-- `box::Box`: the box containing the particle configuration and grid
+- `box::Box`: the box contains the particle configuration and grid
 - `p::Particle`: the particle for which the prediction is computed
 - `dy::Int`: the direction (sign) of the step the particle took while changing rows
 - `dx::Int`: the direction (sign) of the step the particle took while changing columns
 
 # Returns
 
-- `time::Float64`: the time of the next collision
-- `partner::Int`: the index of the collision partner
+- `nextTime::Float64`: the computed time of the next collision
+- `nextPartner::Int`: the computed partner of the next collision
 """
-function computeNextCollisionInsideLNeighborhood(box::Box, p::Particle, dy::Int, dx::Int)
+function computeNextCollisionInsideVisibleNeighborhood(box::Box, p::Particle, dy::Int, dx::Int)
     # REMEMBER that return statements inside IFs make the function allocate a lot more memory!
 
     col = real2grid(p.rx, box.gridSize)
     row = real2grid(p.ry, box.gridSize)
 
-    time = Inf
-    partner = 0
+    nextTime = Inf
+    nextPartner = 0
 
     if dx == 0 && dx == 0
         for row´ in row-1:row+1, col´ in col-1:col+1
-            time, partner = computeNextCollisionInsideCell(box, p, row´, col´, time, partner)
+            nextTime, nextPartner = computeNextCollisionInsideCell(box, p, row´, col´, nextTime, nextPartner)
         end
     elseif dx != 0 && dy != 0
         # TODO: check if this ever happens
@@ -270,26 +274,26 @@ function computeNextCollisionInsideLNeighborhood(box::Box, p::Particle, dy::Int,
         # (y + dy, x), (y + dy, x - dx)
         col´ = col + dx
         for row´ in row-dy:row+dy
-            time, partner = computeNextCollisionInsideCell(box, p, row´, col´, time, partner)
+            nextTime, nextPartner = computeNextCollisionInsideCell(box, p, row´, col´, nextTime, nextPartner)
         end
         row´ = row + dy
         for col´ in col:col-dx
-            time, partner = computeNextCollisionInsideCell(box, p, row´, col´, time, partner)
+            nextTime, nextPartner = computeNextCollisionInsideCell(box, p, row´, col´, nextTime, nextPartner)
         end
     elseif dx != 0
         # (y + 1, x + dx), (y, x + dx), (y - 1, x + dx)
         col´ = col + dx
         for row´ in row-1:row+1
-            time, partner = computeNextCollisionInsideCell(box, p, row´, col´, time, partner)
+            nextTime, nextPartner = computeNextCollisionInsideCell(box, p, row´, col´, nextTime, nextPartner)
         end
     else
         # (y + dy, x + 1), (y + dy, x), (y + dy, x - 1)
         row´ = row + dy
         for col´ in col-1:col+1
-            time, partner = computeNextCollisionInsideCell(box, p, row´, col´, time, partner)
+            nextTime, nextPartner = computeNextCollisionInsideCell(box, p, row´, col´, nextTime, nextPartner)
         end
     end
-    return time, partner
+    return nextTime, nextPartner
 end
 
 
@@ -419,7 +423,7 @@ function updateBox!(box::Box)
     tTransfer, y, x, y´, x´ = predictTransferTime(p, box.cellWidth)
 
     # compute particle's next collision time within appropriate neighborhood
-    tParticleCollision, partner = computeNextCollisionInsideLNeighborhood(box, p, dy, dx)
+    tParticleCollision, partner = computeNextCollisionInsideVisibleNeighborhood(box, p, dy, dx)
     tBorderCollision, border = predictCollisionTime(p, box.gridSize)
 
     # update particle 
