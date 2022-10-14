@@ -127,7 +127,7 @@ Computes the time and partner of the next collision of particle `p` inside the *
 
 # Arguments
 
-- `box::Box`: the box contains the particle configuration and grid
+- `box::Box`: the structure that keeps all the information about the system
 - `p::Particle`: the particle for which the prediction is computed
 - `row::Int`: the row position of the cell to check
 - `col::Int`: the column position of the cell to check
@@ -165,7 +165,7 @@ Computes the time and partner of the next collision of particle `p` inside the *
     nextPartner = currPartner
     for potentialPartner in grid[row´, col´]
         potentialTime = predictCollisionTime(p, config[potentialPartner])
-        if nextTime > potentialTime # TODO 1: AND potential time < potential partner's collision time
+        if nextTime > potentialTime # TODO-1: AND potential time < potential partner's collision time
             nextTime = potentialTime
             nextPartner = potentialPartner
         end
@@ -195,7 +195,7 @@ done but without repeated checks.
 
 # Arguments
 
-- `box::Box`: the box contains the particle configuration and grid
+- `box::Box`: the structure that keeps all the information about the system
 - `p::Particle`: the particle for which the prediction is computed
 
 # Returns
@@ -245,7 +245,7 @@ particle didn't move between cells then the new visible neighborhood is taken to
 
 # Arguments
 
-- `box::Box`: the box contains the particle configuration and grid
+- `box::Box`: the structure that keeps all the information about the system
 - `p::Particle`: the particle for which the prediction is computed
 - `dy::Int`: the direction (sign) of the step the particle took while changing rows
 - `dx::Int`: the direction (sign) of the step the particle took while changing columns
@@ -304,7 +304,7 @@ Handles a wall collision or a particle collision. The involved particles get the
 
 # Arguments
 
-- `box::Box`: the box containing the particle configuration, grid and event queue
+- `box::Box`: the structure that keeps all the information about the system
 - `event::Event`: the collision event to handle; it can be a wall or particle collision
 """
 @inline function handleCollisionEvent!(box::Box, event::Event)
@@ -331,6 +331,7 @@ Handles a wall collision or a particle collision. The involved particles get the
     box.clock = t
 end
 
+
 """
     handleTransferEvent!(box, event)
 
@@ -338,9 +339,8 @@ Handles a transfer event.
 
 # Arguments
 
-- `box::Box`: the box containing the particle configuration, grid and event queue
+- `box::Box`: the structure that keeps all the information about the system
 - `event::Event`: the collision event to handle; it can be a wall or particle collision
-
 """
 @inline function handleTransferEvent!(box::Box, event::Event)
     i = event.particle
@@ -373,20 +373,25 @@ end
 """
     updateBox!(box)
 
-Handles the next event in line and updates the state of the event queue and the particles involved.
+Handles the next event in the priority event queue and updates the
+state of the event queue and the particles involved.
 
 The algorithm follows this steps:
 
 1. Gets the next event from the _Indexed Minimum Priority Queue_
 2. Handles the event according to its type
-  1. In a particle collision both particles get their velocities updated. The next event of particle `p` gets recomputed against all neighboring cells. The event of its partner gets cancelled by changing its type to a CHECK
-  2. In a wall collision the particle involved gets its velocity updated. Its next event gets recomputed against all neighboring cells
-  3. In a transfer event the particle involved gets its grid position updated and its event recomputed according to the next visible neighboring cells
-  4. In a check event the particle gets its event recomputed against all neighboring cells
+    1. In a particle collision both particles get their velocities updated.
+        The next event of particle `p` gets recomputed against all neighboring cells.
+        The event of its partner gets cancelled by changing its type to a CHECK
+    2. In a wall collision the particle involved gets its velocity updated.
+        Its next event gets recomputed against all neighboring cells
+    3. In a transfer event the particle involved gets its grid position updated and its
+        event recomputed against the next visible neighboring cells
+    4. In a check event the particle gets its event recomputed against all neighboring cells
 
 # Arguments
 
-- `box::Box`: the box containing the particle configuration, the grid and the event queue
+- `box::Box`: the structure that keeps all the information about the system
 
 """
 function updateBox!(box::Box)
@@ -476,21 +481,38 @@ function updateBox!(box::Box)
     return isBoxUpdated
 end
 
+
 """
     updateBox!(box, ϕMax, steps)
 
-This is the main program loop. It calls [`updateBox!(box)`](@ref) until the packing fraction reaches an upper limit or its relative increment gets lower than a given threshold
+Main loop. It calls [`updateBox!(box)`](@ref) until the box's packing fraction
+reaches an upper limit (`ϕMax`) or its average relative increment gets lower than a given threshold.
+
+The packing fraction as a function of time can be computed as:
+
+```math
+\\phi(t) = \\sum_i \\pi r_i^2
+= \\sum_i \\pi g_i^2 t^2 = \\phi´ t^2,
+```
+
+and so the average packing fraction increment is:
+
+```math
+\\langle \\Delta\\phi \\rangle
+= \\frac{1}{n} \\sum_{k=1}^n \\frac{\\phi_k - \\phi_{k-1}}{\\phi_{k-1}}
+= \\left[\\frac{1}{n} \\sum_{k=1}^n \\left(\\frac{t_k}{t_{k-1}}\\right)^2\\right] - 1
+```
 
 # Arguments
 
-- `box::Box`: the box containing the particle configuration, grid and event queue
+- `box::Box`: the structure that keeps all the information about the system
 - `ϕMax::Float64`: the target packing fraction
-- `n::Int`: the number of measurements to average to get the average relative increment of the packing fraction
+- `n::Int`: the number of measurements to average to get the relative packing fraction increment
 """
 function updateBox!(box::Box, ϕMax::Float64; n::Int=1000000)
     ϕCurr = 0.0
-    δϕ = 0.0    # ∑(tCurr/tPrev)²
     Δϕ = Inf    # <Δϕ> = ∑[(ϕCurr-ϕPrev)/ϕPrev]/n = ∑[(tCurr/tPrev)²-1]/n = ∑(δϕ)/n - 1
+    δϕ = 0.0    # ∑(tCurr/tPrev)²
     k = 0
     ϕRate = box.packingRate
     while ϕCurr < ϕMax && Δϕ > 1.0e-6

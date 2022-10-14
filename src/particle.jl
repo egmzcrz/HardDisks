@@ -29,6 +29,7 @@ mutable struct Particle
 end
 
 function move!(p::Particle, t::Float64)
+    # TODO: implement periodic boundry conditions
     dt = t - p.clock
     p.rx += p.vx * dt
     p.ry += p.vy * dt
