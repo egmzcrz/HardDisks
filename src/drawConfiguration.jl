@@ -16,8 +16,10 @@ function gpPrintParticles(gp::Base.Process, box::Box)
         rx = p.rx + p.vx * dt
         ry = p.ry + p.vy * dt
         if ry + r > 1.0 + 1e-10
+            gpPrint(gp, rx, ry, r, m)
             ry -= 1.0
         elseif ry - r < -1e-10
+            gpPrint(gp, rx, ry, r, m)
             ry += 1.0
         end
         gpPrint(gp, rx, ry, r, m)
@@ -86,9 +88,12 @@ function vizBox(ϕ₀::Float64, n::Vector{Int}, g::Vector{Float64}, gapLength::F
     gp = open(`gnuplot`, "w")
     println(gp, boxStyle(box.cellWidth, box.gapLength))
     println(gp, "set term qt persist noraise size 700,700 pos 700,50 font 'Helvetica,8'")
-    p = box.config[40]
+    #p = box.config[1]
     for k = 0:frameSkip:frames
-        println(minKey(box.events), " ", p.rx, " ", p.ry)
+        #println(minKey(box.events), " ", p.rx, " ", p.ry)
+        event = minKey(box.events)
+        println(event)
+
         println(
             gp,
             """unset label
@@ -138,5 +143,5 @@ end
 seed = rand(1:10^10)
 Random.seed!(seed)
 println(lpad("seed = ", 10), seed)
-#vizBox(0.816348045, [100], [0.5], 0.0, 5000, 10, pause=false)
-@time drawBox(0.85, [500, 500], [1.0, 2.0], 0.0)
+#vizBox(0.0, [100, 200], [1.0, 2.0], 0.3, 100000, 500, pause=false)
+@time drawBox(0.85, [300, 400], [1.0, 2.0], 0.4)

@@ -1,5 +1,4 @@
-export Box, computeNextCollisionInsideCell, computeNextCollisionInsideLNeighborhood,
-computeNextCollisionInsideVisibleNeighborhood, updateBox!, handleCollisionEvent!, handleTransferEvent!
+export Box, updateBox!
 
 include("event.jl")
 include("particle.jl")
@@ -96,7 +95,7 @@ mutable struct Box
                     partner = j
                 end
                 # check for border collisions
-                t, j = predictCollisionTime(p, gridSize)
+                t, j = computeNextBorderCollision(p, gridSize, gapLength)
                 if tCollision > t
                     tCollision = t
                     border = j
@@ -109,7 +108,7 @@ mutable struct Box
             end
         end
 
-        box.gapLength = 0.0
+        box.gapLength = gapLength
         box.events = events
         box.cellWidth = cellWidth
         box.flux = 0
@@ -298,6 +297,99 @@ end
 
 
 """
+    computeNextBorderCollision(p, gridSize, gapLength)
+
+Computes the time and border of the next collision
+
+# Arguments
+
+- `box::Box`: the structure that keeps all the information about the system
+- `gridSize::Int`: the collision event to handle; it can be a wall or particle collision
+- `gapLength::Float64`: the size of the opening where particles can flow through 
+"""
+function computeNextBorderCollision(p::Particle, gridSize::Int, gapLength::Float64)
+    dtCollision::Float64 = Inf
+    border::Border = NONE
+    y = Int(ceil(p.ry * gridSize))
+    x = Int(ceil(p.rx * gridSize))
+
+    # Left border collision
+    if x == 1
+        vel = p.vx - p.growthRate
+        if vel < 0.0
+            radius = p.clock * p.growthRate
+            dist = radius - p.rx
+            dt = dist < 0.0 ? dist / vel : 0.0
+        else
+            dt = Inf
+        end
+
+        if dtCollision > dt
+            dtCollision = dt
+            border = LEFT
+        end
+    end
+
+    # Right border collision
+    if x == gridSize
+        vel = p.vx + p.growthRate
+        if vel > 0.0
+            radius = p.clock * p.growthRate
+            dist = 1.0 - radius - p.rx
+            dt = dist > 0.0 ? dist / vel : 0.0
+        else
+            dt = Inf
+        end
+
+        if dtCollision > dt
+            dtCollision = dt
+            border = RIGHT
+        end
+    end
+
+    # Bottom border collision
+    if y == 1
+        vel = p.vy - p.growthRate
+        if vel < 0.0
+            radius = p.clock * p.growthRate
+            dist = radius - p.ry
+            dt = dist < 0.0 ? dist / vel : 0.0
+        else
+            dt = Inf
+        end
+
+        if dtCollision > dt
+            dtCollision = dt
+            border = BOTTOM
+        end
+    end
+
+    # Top border collision
+    if y == gridSize
+        vel = p.vy + p.growthRate
+        if vel > 0.0
+            radius = p.clock * p.growthRate
+            dist = 1.0 - radius - p.ry
+            dt = dist > 0.0 ? dist / vel : 0.0
+        else
+            dt = Inf
+        end
+
+        xpos = p.rx + p.vx * dt
+        gapSpan = gapLength/2.0
+        xmin = 0.5 - gapSpan
+        xmax = 0.5 + gapSpan
+
+        if dtCollision > dt && !(xmin < xpos < xmax)
+            dtCollision = dt
+            border = TOP
+        end
+    end
+    return p.clock + dtCollision, border
+end
+
+
+"""
     handleCollisionEvent!(box, event)
 
 Handles a wall collision or a particle collision. The involved particles get their state updated.
@@ -313,19 +405,32 @@ Handles a wall collision or a particle collision. The involved particles get the
     p = box.config[i]
     t = event.timestamp
     if j > 0 # particle collision
-        collide!(p, box.config[j], t)
+        q = box.config[j]
+
+        move!(p, t)
+        move!(q, t)
+
+        # Handles collision with pbcs
+        ry = p.ry
+        p.ry -= round(p.ry - q.ry)
+        collide!(p, box.config[j])
+        p.ry = ry
+
         # update partner event to a CHECK event
         changeKey!(box.events, j, Event(t, Inf, j, i, NONE, 0, 0, 0, 0, CHECK))
     else # border collision
         border = event.border
+
+        move!(p, t)
+
         if border == RIGHT
-            collideWithRightWall!(p, t)
+            reflectLeft!(p)
         elseif border == TOP
-            collideWithTopWall!(p, t)
+            reflectDown!(p)
         elseif border == LEFT
-            collideWithLeftWall!(p, t)
-        else
-            collideWithBottomWall!(p, t)
+            reflectRight!(p)
+        else # border == BOTTOM
+            reflectUp!(p)
         end
     end
     box.clock = t
@@ -429,7 +534,7 @@ function updateBox!(box::Box)
 
     # compute particle's next collision time within appropriate neighborhood
     tParticleCollision, partner = computeNextCollisionInsideVisibleNeighborhood(box, p, dy, dx)
-    tBorderCollision, border = predictCollisionTime(p, box.gridSize)
+    tBorderCollision, border = computeNextBorderCollision(p, box.gridSize, box.gapLength)
 
     # update particle 
     tCollision = tParticleCollision

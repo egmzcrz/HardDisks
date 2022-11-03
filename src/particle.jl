@@ -29,17 +29,16 @@ mutable struct Particle
 end
 
 function move!(p::Particle, t::Float64)
-    # TODO: implement periodic boundry conditions
+    # Move in a straight line.
     dt = t - p.clock
     p.rx += p.vx * dt
     p.ry += p.vy * dt
+
+    # Update particle's internal clock
     p.clock = t
 end
 
-function collide!(p::Particle, q::Particle, t::Float64)
-    move!(p, t)
-    move!(q, t)
-
+function collide!(p::Particle, q::Particle)
     dx::Float64 = q.rx - p.rx
     dy::Float64 = q.ry - p.ry
     dvx::Float64 = q.vx - p.vx
@@ -67,20 +66,16 @@ function collide!(p::Particle, q::Particle, t::Float64)
 end
 
 # TODO: weird behaviour when the collision is a back-collision
-function collideWithRightWall!(p::Particle, t::Float64)
-    move!(p, t)
+function reflectLeft!(p::Particle)
     p.vx = -(abs(p.vx) + p.growthRate)
 end
-function collideWithLeftWall!(p::Particle, t::Float64)
-    move!(p, t)
+function reflectRight!(p::Particle)
     p.vx = abs(p.vx) + p.growthRate
 end
-function collideWithTopWall!(p::Particle, t::Float64)
-    move!(p, t)
+function reflectDown!(p::Particle)
     p.vy = -(abs(p.vy) + p.growthRate)
 end
-function collideWithBottomWall!(p::Particle, t::Float64)
-    move!(p, t)
+function reflectUp!(p::Particle)
     p.vy = abs(p.vy) + p.growthRate
 end
 
@@ -128,120 +123,6 @@ function predictCollisionTime(p::Particle, q::Particle)
     else
         return Inf
     end
-
-    #if c == 0; return Inf; end
-    #if c < 0; c = 0; end
-    #Δ::Float64 = b^2 - a*c
-    #if a < 0
-    #	# In this case numerator is always negative.
-    #	if c == 0
-    #		return 0.0
-    #	else
-    #		d = - b - sqrt(Δ)
-    #		if d > 0; d = 0; end
-    #		return d / a
-    #	end
-    #elseif a > 0
-    #	# In this case numerator can be negative or complex.
-    #	if c == 0
-    #		return b < 0 ? 0.0 : Inf
-    #	else
-    #		if -1e-12 < Δ < 0; Δ = 0; end
-    #		if Δ >= 0
-    #			d = - b - sqrt(Δ)
-    #			return d >= 0 ? d / a : Inf
-    #		else
-    #			return Inf
-    #		end
-    #	end
-    #else
-    #	return  c >= 0 && b < 0 ? -c/(2*b) : Inf
-    #end
-end
-
-function predictCollisionTime(p::Particle, gridSize::Int)
-    dtCollision::Float64 = Inf
-    border::Border = NONE
-    y = Int(ceil(p.ry * gridSize))
-    x = Int(ceil(p.rx * gridSize))
-    if x == 1
-        dt = predictLeftBorderCollision(p)
-        if dtCollision > dt
-            dtCollision = dt
-            border = LEFT
-        end
-    end
-    if x == gridSize
-        dt = predictRightBorderCollision(p)
-        if dtCollision > dt
-            dtCollision = dt
-            border = RIGHT
-        end
-    end
-    if y == 1
-        dt = predictBottomBorderCollision(p)
-        if dtCollision > dt
-            dtCollision = dt
-            border = BOTTOM
-        end
-    end
-    if y == gridSize
-        dt = predictTopBorderCollision(p)
-        if dtCollision > dt
-            dtCollision = dt
-            border = TOP
-        end
-    end
-    return p.clock + dtCollision, border
-end
-
-function predictRightBorderCollision(p::Particle)
-    vel::Float64 = p.vx + p.growthRate
-    if vel > 0.0
-        radius = p.clock * p.growthRate
-        dist::Float64 = 1.0 - radius - p.rx
-        if dist < 0.0
-            dist = 0.0
-        end
-        return dist / vel
-    end
-    return Inf
-end
-function predictLeftBorderCollision(p::Particle)
-    vel::Float64 = p.vx - p.growthRate
-    if vel < 0.0
-        radius = p.clock * p.growthRate
-        dist::Float64 = radius - p.rx
-        if dist > 0.0
-            dist = 0.0
-        end
-        return dist / vel
-    end
-    return Inf
-end
-function predictTopBorderCollision(p::Particle)
-    vel::Float64 = p.vy + p.growthRate
-    if vel > 0.0
-        radius = p.clock * p.growthRate
-        dist::Float64 = 1.0 - radius - p.ry
-        if dist < 0.0
-            dist = 0.0
-        end
-        return dist / vel
-    end
-    return Inf
-end
-function predictBottomBorderCollision(p::Particle)
-    vel::Float64 = p.vy - p.growthRate
-    if vel < 0.0
-        radius = p.clock * p.growthRate
-        dist::Float64 = radius - p.ry
-        if dist > 0.0
-            dist = 0.0
-        end
-        return dist / vel
-    end
-    return Inf
 end
 
 function predictTransferTime(p::Particle, w::Float64)
